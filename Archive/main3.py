@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from streamlit.components.v1 import html
 
 import os
+import streamlit.web.cli as stcli
 import sys
 from streamlit.components.v1 import html
 
@@ -125,16 +126,16 @@ def create_table(data):
             ticker,
             values['status'],
             f"{values['latest_price']:.2f}",
-            f"{values['SMA5']:.2f}" if values['SMA5'] != 'N/A' else 'N/A', values['SMA5_trend'],
-            f"{values['SMA50']:.2f}" if values['SMA50'] != 'N/A' else 'N/A', values['SMA50_trend'],
-            f"{values['SMA150']:.2f}" if values['SMA150'] != 'N/A' else 'N/A', values['SMA150_trend'],
-            f"{values['SMA200']:.2f}" if values['SMA200'] != 'N/A' else 'N/A', values['SMA200_trend'],
-            f"{values['VWAP_YearStart']:.2f}" if values['VWAP_YearStart'] != 'N/A' else 'N/A', values['VWAP_YearStart_trend'],
-            f"{values['VWAP_RecentHigh']:.2f}" if values['VWAP_RecentHigh'] != 'N/A' else 'N/A', values['VWAP_RecentHigh_trend'],
-            f"{values['VWAP_RecentLow']:.2f}" if values['VWAP_RecentLow'] != 'N/A' else 'N/A', values['VWAP_RecentLow_trend'],
-            f"{values['VWAP_Earnings']:.2f}" if values['VWAP_Earnings'] not in ['N/A', None] else 'N/A',
+            f"{values['SMA5']:.2f}", values['SMA5_trend'],
+            f"{values['SMA50']:.2f}", values['SMA50_trend'],
+            f"{values['SMA150']:.2f}", values['SMA150_trend'],
+            f"{values['SMA200']:.2f}", values['SMA200_trend'],
+            f"{values['VWAP_YearStart']:.2f}", values['VWAP_YearStart_trend'],
+            f"{values['VWAP_RecentHigh']:.2f}", values['VWAP_RecentHigh_trend'],
+            f"{values['VWAP_RecentLow']:.2f}", values['VWAP_RecentLow_trend'],
+            f"{values['VWAP_Earnings']:.2f}" if values['VWAP_Earnings'] else 'N/A',
             values['VWAP_Earnings_trend'] if values['VWAP_Earnings_trend'] else '',
-            f"{values['current_volume'] / values['avg_volume_20d']:.2f}" if values['avg_volume_20d'] != 0 else 'N/A'
+            f"{values['current_volume'] / values['avg_volume_20d']:.2f}"
         ]
         
         row_colors = ['black'] * len(row)
@@ -154,15 +155,10 @@ def create_table(data):
         # Set colors for SMA and VWAP columns
         value_indices = [3, 5, 7, 9, 11, 13, 15, 17]
         for i in value_indices:
-            if row[i] != 'N/A' and values['latest_price'] != 'N/A':
-                try:
-                    if float(row[i].replace('$', '')) > values['latest_price']:
-                        row_colors[i] = 'red'
-                    elif float(row[i].replace('$', '')) < values['latest_price']:
-                        row_colors[i] = 'green'
-                except ValueError:
-                    # If conversion fails, leave the color as black
-                    pass
+            if float(row[i].replace('$', '')) > values['latest_price']:
+                row_colors[i] = 'red'
+            elif float(row[i].replace('$', '')) < values['latest_price']:
+                row_colors[i] = 'green'
         
         # Set colors for trend columns
         trend_indices = [4, 6, 8, 10, 12, 14, 16, 18]
@@ -175,13 +171,8 @@ def create_table(data):
                 row_font_colors[i] = 'white'
         
         # Set color for volume comparison
-        if row[-1] != 'N/A':
-            try:
-                if float(row[-1]) > 1:
-                    row_colors[-1] = 'darkorange'
-            except ValueError:
-                # If conversion fails, leave the color as black
-                pass
+        if float(row[-1]) > 1:
+            row_colors[-1] = 'darkorange'
         
         table_data.append(row)
         cell_colors.append(row_colors)
@@ -189,18 +180,18 @@ def create_table(data):
 
     # Define column widths
     column_widths = [
-        25,  # TICKER
-        30,  # STATUS
-        25,  # LAST
-        30, 10,  # 5D SMA and trend
-        30, 10,  # 50D SMA and trend
-        30, 10,  # 150D SMA and trend
-        30, 10,  # 200D SMA and trend
-        30, 10,  # VWAP YTD and trend
-        30, 10,  # VWAP HIGH and trend
-        30, 10,  # VWAP LOW and trend
-        30, 10,  # VWAP EARN and trend
-        40   # VOL/20D AVG
+        30,  # TICKER
+        40,  # STATUS
+        30,  # LAST
+        40, 15,  # 5D SMA and trend
+        40, 15,  # 50D SMA and trend
+        40, 15,  # 150D SMA and trend
+        40, 15,  # 200D SMA and trend
+        40, 15,  # VWAP YTD and trend
+        40, 15,  # VWAP HIGH and trend
+        40, 15,  # VWAP LOW and trend
+        40, 15,  # VWAP EARN and trend
+        50   # VOL/20D AVG
     ]
 
     column_alignment = [
@@ -222,13 +213,14 @@ def create_table(data):
         header=dict(
             values=[f"<b>{h}</b>" for h in headers],
             fill_color='black',
-            align=column_alignment,
+            align=column_alignment,  # Align headers with data columns
             font=dict(color='#FF9933', size=18),
             height=40
         ),
         cells=dict(
             values=[list(col) for col in zip(*table_data)],
             align=column_alignment,
+            # align=['left'] * len(headers),
             font=dict(color=[list(col) for col in zip(*font_colors)], size=18),
             fill=dict(color=[list(col) for col in zip(*cell_colors)]),
             height=30,
@@ -238,17 +230,11 @@ def create_table(data):
         columnwidth=column_widths
     )])
 
-    # Calculate the total width of all columns
-    total_width = sum(column_widths)
-
     fig.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         paper_bgcolor='black',
         plot_bgcolor='black',
-        height=len(data) * 30 + 40,  # Adjust table height based on number of rows
-        width=max(total_width * 5, 1000),  # Set a minimum width for the table
-        autosize=False,
-        font=dict(size=18),  # Increase overall font size
+        height=len(data) * 30 + 40  # Adjust table height based on number of rows
     )
 
     return fig
@@ -275,15 +261,14 @@ def main():
         border: 1px solid #FF9933;
         border-radius: 0px;
         font-family: 'Roboto Mono', monospace;
-        font-size: 16px;
+        font-size: 14px;
         padding: 5px 10px;
-        text-transform: uppercase;
     }
     h1 {
         color: #FF9933;
         font-size: 24px;
         font-weight: bold;
-        margin: 0;  /* Remove default margin */
+        margin-bottom: 20px;
     }
     .status-bar {
         position: fixed;
@@ -296,118 +281,33 @@ def main():
         font-size: 12px;
         font-weight: bold;
         z-index: 1000;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .status-bar a {
-        color: black;
-        text-decoration: none;
-    }
-    .status-bar a:hover {
-        text-decoration: underline;
-    }
-    .header-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 20px 0;  /* Add padding to the top and bottom */
-    }
-    .info-button {
-        background-color: #FF9933;
-        color: black;
-        border: none;
-        padding: 5px 10px;
-        font-size: 16px;  /* Match the size with the title */
-        cursor: pointer;
-        border-radius: 15px;
-        transition: background-color 0.3s ease;
-        height: 30px;  /* Set a specific height */
-        line-height: 20px;  /* Adjust line height for vertical centering */
-    }
-    .info-button:hover {
-        background-color: #E68A00;
-    }
-    .info-section {
-        display: none;
-        position: fixed;
-        bottom: 30px;
-        left: 0;
-        right: 0;
-        background-color: #1E1E1E;
-        color: #FF9933;
-        padding: 20px;
-        border-top: 1px solid #FF9933;
-        z-index: 999;
-    }
-    .info-content {
-        display: flex;
-        justify-content: space-between;
-    }
-    .info-column {
-        flex: 1;
-        padding: 0 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-    # Header with title and info button
-    st.markdown("""
-    <div class="header-container">
-        <h1>SKYHOOK スカイフック v0.1</h1>
-        <button class="info-button" onclick="toggleInfo()">Press i for info</button>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Info section (initially hidden)
-    st.markdown("""
-    <div id="info-section" class="info-section">
-        <div class="info-content">
-            <div class="info-column">
-                <strong>SHORTCUTS:</strong><br>
-                - PRESS `/` FOR SEARCH BAR<br>
-                - PRESS `ESC` TO CLEAR INPUT<br>
-                - PRESS `ENTER` TO ANALYZE
-            </div>
-            <div class="info-column">
-                <strong>VWAPs:</strong><br>
-                - YTD: Anchored on start of current year<br>
-                - H: Anchored on recent high<br>
-                - L: Anchored on recent low<br>
-                - E: Anchored on last quarterly earnings
-            </div>
-            <div class="info-column">
-                <strong>TREND LETTERS:</strong><br>
-                - R: Rising trend<br>
-                - F: Falling trend
-            </div>
-            <div class="info-column">
-                <strong>Status:</strong><br>
-                - Avoid: Refrain from accumulating<br>
-                - Caution: Proceed cautiously<br>
-                - Clear: Safe to accumulate
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<h1>SKYHOOK スカイフック v0.1</h1>", unsafe_allow_html=True)
     
     # Input for stock tickers
     tickers_input = st.text_input("ENTER TICKERS (SPACE-SEPARATED):", key="tickers")
+    
+    # Instructions
+    st.markdown("""
+    **SHORTCUTS:**
+    - PRESS `ENTER` TO ANALYZE
+    - PRESS `ESC` TO CLEAR INPUT
+    - PRESS `/` FOR SEARCH BAR
+    """)
     
     # Keyboard shortcut handling
     js = """
     <script>
     const doc = window.parent.document;
-    function toggleInfo() {
-        const infoSection = doc.getElementById('info-section');
-        infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
-    }
     doc.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
             const inputField = doc.querySelector('.stTextInput input');
             if (inputField && inputField.value.trim() !== '') {
-                inputField.blur();
+                inputField.blur();  // This is the key part that triggers submission in Streamlit
                 inputField.form.requestSubmit();
             }
         } else if (e.key === 'Escape') {
@@ -421,15 +321,12 @@ def main():
             e.preventDefault();
             const inputField = doc.querySelector('.stTextInput input');
             if (inputField) inputField.focus();
-        } else if (e.key === 'i' || e.key === 'I') {
-            toggleInfo();
         }
     });
     </script>
     """
     html(js, height=0)
     
-
     if tickers_input:
         tickers = [ticker.strip().upper() for ticker in tickers_input.split() if ticker.strip()]
         with st.spinner("FETCHING DATA..."):
@@ -443,27 +340,12 @@ def main():
             if data:
                 fig = create_table(data)
                 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                
-                # Add custom CSS for horizontal scrolling
-                st.markdown("""
-                <style>
-                .stPlotlyChart {
-                    overflow-x: auto;
-                    white-space: nowrap;
-                }
-                </style>
-                """, unsafe_allow_html=True)
             else:
                 st.warning("NO VALID DATA TO DISPLAY.")
     
     # Status bar
     st.markdown(
-        """
-        <div class='status-bar'>
-            <div>i: TOGGLE INFO | /: SEARCH | ESC: CLEAR | ENTER: ANALYZE </div>
-            <div>&copy 2024 <a href="https://www.sebastianquadrat.com" target="_blank">Sebastian Quadrat</a></div>
-        </div>
-        """,
+        "<div class='status-bar'>ENTER: ANALYZE | ESC: CLEAR | /: SEARCH</div>",
         unsafe_allow_html=True
     )
 

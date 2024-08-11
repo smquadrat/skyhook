@@ -6,15 +6,16 @@ import plotly.graph_objects as go
 from streamlit.components.v1 import html
 
 import os
+import streamlit.web.cli as stcli
 import sys
 from streamlit.components.v1 import html
 
 def calculate_vwap(data):
     return (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
 
-def get_stock_data(ticker):
+def get_stock_data(ticker, years):
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=365)  # 1 year ago
+    start_date = end_date - timedelta(days=365 * years)  # 1, 2, or 3 years ago
     data = yf.download(ticker, start=start_date, end=end_date, interval="1d")
     
     latest_data = yf.download(ticker, period="1d", interval="1m")
@@ -390,18 +391,52 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Input for stock tickers with year selection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        tickers_input = st.text_input("ENTER TICKERS (SPACE-SEPARATED):", key="tickers")
+    with col2:
+        # Use Streamlit's selectbox for year selection
+        selected_years = st.selectbox(
+            "YEAR(S)",
+            options=[1, 2, 3],
+            index=0,
+            key="selected_years"
+        )
     
-    # Input for stock tickers
-    tickers_input = st.text_input("ENTER TICKERS (SPACE-SEPARATED):", key="tickers")
-    
-    # Keyboard shortcut handling
+# Keyboard shortcut handling and button functionality
     js = """
     <script>
     const doc = window.parent.document;
+    let selectedYears = 1;
+
     function toggleInfo() {
         const infoSection = doc.getElementById('info-section');
         infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
     }
+
+    function selectYear(year) {
+        const buttons = doc.querySelectorAll('.year-button');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        doc.getElementById(`year-${year}`).classList.add('selected');
+        selectedYears = year;
+        updateTable();
+    }
+
+    function updateTable() {
+        const inputField = doc.querySelector('.stTextInput input');
+        if (inputField && inputField.value.trim() !== '') {
+            // Create a new submit event
+            const event = new Event('submit', {
+                'bubbles': true,
+                'cancelable': true
+            });
+            // Dispatch the event
+            inputField.form.dispatchEvent(event);
+        }
+    }
+
     doc.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -423,12 +458,48 @@ def main():
             if (inputField) inputField.focus();
         } else if (e.key === 'i' || e.key === 'I') {
             toggleInfo();
+        } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+            selectYear(parseInt(e.key));
         }
     });
+
+    // Add click event for the info button
+    doc.querySelector('.info-button').addEventListener('click', toggleInfo);
+
+    // Function to update Streamlit's session state
+    function updateSessionState(key, value) {
+        const scalarData = new Float64Array([value]);
+        const vectorData = new Uint8Array(scalarData.buffer);
+        const event = new CustomEvent('streamlit:set_widget_state', {
+            bubbles: true,
+            detail: {
+                stateType: 'number',
+                widgetId: key,
+                data: vectorData
+            }
+        });
+        doc.dispatchEvent(event);
+    }
+
+    // Update session state when year is selected
+    function selectYear(year) {
+        const buttons = doc.querySelectorAll('.year-button');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        doc.getElementById(`year-${year}`).classList.add('selected');
+        selectedYears = year;
+        updateSessionState('selected_years', year);
+        updateTable();
+    }
     </script>
     """
     html(js, height=0)
     
+    # Initialize session state for selected years
+    if 'selected_years' not in st.session_state:
+        st.session_state.selected_years = 1
+
+    # Use the selected years value from session state
+    selected_years = st.session_state.selected_years
 
     if tickers_input:
         tickers = [ticker.strip().upper() for ticker in tickers_input.split() if ticker.strip()]
@@ -436,7 +507,7 @@ def main():
             data = {}
             for ticker in tickers:
                 try:
-                    data[ticker] = get_stock_data(ticker)
+                    data[ticker] = get_stock_data(ticker, selected_years)
                 except Exception as e:
                     st.error(f"ERROR FETCHING DATA FOR {ticker}: {str(e)}")
             
@@ -455,17 +526,6 @@ def main():
                 """, unsafe_allow_html=True)
             else:
                 st.warning("NO VALID DATA TO DISPLAY.")
-    
-    # Status bar
-    st.markdown(
-        """
-        <div class='status-bar'>
-            <div>i: TOGGLE INFO | /: SEARCH | ESC: CLEAR | ENTER: ANALYZE </div>
-            <div>&copy 2024 <a href="https://www.sebastianquadrat.com" target="_blank">Sebastian Quadrat</a></div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 
 if __name__ == "__main__":
     # Check if the script is being run directly
