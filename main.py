@@ -252,6 +252,30 @@ def create_table(data):
 
     return fig
 
+def get_vix_data():
+    tickers = ["^VIX", "VXX", "VXZ"]
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)  # Fetch 30 days of data to calculate 20-day MA
+    data = yf.download(tickers, start=start_date, end=end_date)
+    
+    vix_data = data['Close']['^VIX']
+    vxx_data = data['Close']['VXX']
+    vxz_data = data['Close']['VXZ']
+    
+    vix_spot = vix_data.iloc[-1]
+    vxx_price = vxx_data.iloc[-1]
+    vxz_price = vxz_data.iloc[-1]
+    
+    vix_ma20 = vix_data.rolling(window=20).mean().iloc[-1]
+    vxx_ma20 = vxx_data.rolling(window=20).mean().iloc[-1]
+    vxz_ma20 = vxz_data.rolling(window=20).mean().iloc[-1]
+    
+    vix_ratio = vix_spot / vix_ma20
+    vxx_ratio = vxx_price / vxx_ma20
+    vxz_ratio = vxz_price / vxz_ma20
+    
+    return vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio
+
 def main():
     st.set_page_config(page_title="Skyhook v0.1", layout="wide")
     
@@ -282,7 +306,7 @@ def main():
         color: #FF9933;
         font-size: 24px;
         font-weight: bold;
-        margin: 0;  /* Remove default margin */
+        margin: 0;
     }
     .status-bar {
         position: fixed;
@@ -310,19 +334,19 @@ def main():
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 20px 0;  /* Add padding to the top and bottom */
+        padding: 20px 0;
     }
     .info-button {
         background-color: #FF9933;
         color: black;
         border: none;
         padding: 5px 10px;
-        font-size: 16px;  /* Match the size with the title */
+        font-size: 16px;
         cursor: pointer;
         border-radius: 15px;
         transition: background-color 0.3s ease;
-        height: 30px;  /* Set a specific height */
-        line-height: 20px;  /* Adjust line height for vertical centering */
+        height: 30px;
+        line-height: 20px;
     }
     .info-button:hover {
         background-color: #E68A00;
@@ -347,13 +371,56 @@ def main():
         flex: 1;
         padding: 0 10px;
     }
+    .header-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 0;
+    }
+    .vix-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .vix-box {
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-weight: bold;
+        text-align: center;
+        margin: 0 5px;
+        font-size: 14px;
+    }
+    .title-and-vix {
+        display: flex;
+        align-items: center;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    # Header with title and info button
-    st.markdown("""
+    # Fetch VIX data
+    vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio = get_vix_data()
+
+    # Determine colors based on conditions
+    vix_color = "red" if vix_spot > vxx_price or vix_spot > vxz_price else "green"
+    vxx_color = "red" if vxx_price > vxz_price else "green"
+
+    # Header with title, VIX boxes, and info button
+    st.markdown(f"""
     <div class="header-container">
-        <h1>SKYHOOK スカイフック v0.1</h1>
+        <div class="title-and-vix">
+            <h1>SKYHOOK スカイフック v0.1</h1>
+            <div class="vix-container">
+                <div class="vix-box" style="background-color: {vix_color}; color: white;">
+                    VIX: {vix_spot:.2f} [{vix_ratio:.2f}]
+                </div>
+                <div class="vix-box" style="background-color: {vxx_color}; color: white;">
+                    VXX: {vxx_price:.2f} [{vxx_ratio:.2f}]
+                </div>
+                <div class="vix-box" style="background-color: black; color: #FF9933; border: 1px solid #FF9933;">
+                    VXZ: {vxz_price:.2f} [{vxz_ratio:.2f}]
+                </div>
+            </div>
+        </div>
         <button class="info-button" onclick="toggleInfo()">Press i for info</button>
     </div>
     """, unsafe_allow_html=True)
@@ -428,7 +495,6 @@ def main():
     """
     html(js, height=0)
     
-
     if tickers_input:
         tickers = [ticker.strip().upper() for ticker in tickers_input.split() if ticker.strip()]
         with st.spinner("FETCHING DATA..."):
