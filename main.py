@@ -86,9 +86,60 @@ def get_stock_data(ticker):
     else:
         status = ''
 
+    # Calculate P/Sales and P/FCF
+    stock = yf.Ticker(ticker)
+    market_cap = stock.info.get('marketCap')
+    
+    income_stmt = stock.quarterly_financials.T
+    cashflow_stmt = stock.quarterly_cashflow.T
+    
+    revenue_col = 'Total Revenue'
+    free_cash_flow_col = 'Free Cash Flow'
+    
+    if revenue_col in income_stmt.columns and free_cash_flow_col in cashflow_stmt.columns:
+        income_stmt = income_stmt.sort_index(ascending=False)
+        cashflow_stmt = cashflow_stmt.sort_index(ascending=False)
+        
+        ttm_revenue = income_stmt[revenue_col].head(4).sum()
+        ttm_free_cash_flow = cashflow_stmt[free_cash_flow_col].head(4).sum()
+        
+        p_s_ratio = market_cap / ttm_revenue if ttm_revenue and ttm_revenue != 0 else None
+        p_fcf_ratio = market_cap / ttm_free_cash_flow if ttm_free_cash_flow and ttm_free_cash_flow != 0 else None
+
+        # Calculate TTM trends
+        prev_ttm_revenue = income_stmt[revenue_col].iloc[1:5].sum()
+        prev_ttm_fcf = cashflow_stmt[free_cash_flow_col].iloc[1:5].sum()
+
+        ttm_revenue_trend = 'R' if ttm_revenue > prev_ttm_revenue else 'F'
+        ttm_fcf_trend = 'R' if ttm_free_cash_flow > prev_ttm_fcf else 'F'
+    else:
+        p_s_ratio = None
+        p_fcf_ratio = None
+        ttm_revenue_trend = None
+        ttm_fcf_trend = None
+
+    # Get the next earnings date
+    earnings_dates = ticker_info.earnings_dates
+    next_earnings_date = None
+    days_to_earnings = None
+
+    if earnings_dates is not None and not earnings_dates.empty:
+        earnings_dates.index = pd.to_datetime(earnings_dates.index)
+        current_time = datetime.now().astimezone(earnings_dates.index.tz)
+        future_earnings_dates = earnings_dates.index[earnings_dates.index > current_time]
+        
+        if not future_earnings_dates.empty:
+            next_earnings_date = future_earnings_dates.min()
+            
+            if next_earnings_date.tzinfo:
+                next_earnings_date = next_earnings_date.tz_localize(None)
+            
+            days_to_earnings = (next_earnings_date - pd.Timestamp.now()).days
+
     return {
         'latest_price': latest_price,
         'status': status,
+        'days_to_earnings': days_to_earnings,
         'SMA5': sma5,
         'SMA5_trend': 'R' if data['SMA5'].iloc[-1] > data['SMA5'].iloc[-2] else 'F',
         'SMA50': sma50,
@@ -107,12 +158,16 @@ def get_stock_data(ticker):
         'VWAP_Earnings_trend': 'R' if earnings_data is not None and earnings_data['VWAP_Earnings'].iloc[-1] > earnings_data['VWAP_Earnings'].iloc[-2] else 'F' if earnings_data is not None else None,
         'current_volume': current_volume,
         'avg_volume_20d': avg_volume_20d,
+        'P/S': p_s_ratio,
+        'P/S_trend': ttm_revenue_trend,
+        'P/FCF': p_fcf_ratio,
+        'P/FCF_trend': ttm_fcf_trend
     }
 
 def create_table(data):
     headers = [
-        'TICKER', 'STATUS', 'LAST', '5D SMA', '', '50D SMA', '', '150D SMA', '', '200D SMA', '',
-        'VWAP YTD', '', 'VWAP H', '', 'VWAP L', '', 'VWAP E', '', 'VOL/20D AVG'
+        'TICKER', 'STATUS', 'E', 'LAST', '5D SMA', '', '50D SMA', '', '150D SMA', '', '200D SMA', '',
+        'VWAP YTD', '', 'VWAP H', '', 'VWAP L', '', 'VWAP E', '', 'VOL/20D AVG', 'P/S', '', 'P/FCF', ''
     ]
 
     table_data = []
@@ -123,6 +178,7 @@ def create_table(data):
         row = [
             ticker,
             values['status'],
+            str(values['days_to_earnings']) if values['days_to_earnings'] is not None else 'N/A',
             f"{values['latest_price']:.2f}",
             f"{values['SMA5']:.2f}" if values['SMA5'] != 'N/A' else 'N/A', values['SMA5_trend'],
             f"{values['SMA50']:.2f}" if values['SMA50'] != 'N/A' else 'N/A', values['SMA50_trend'],
@@ -133,7 +189,11 @@ def create_table(data):
             f"{values['VWAP_RecentLow']:.2f}" if values['VWAP_RecentLow'] != 'N/A' else 'N/A', values['VWAP_RecentLow_trend'],
             f"{values['VWAP_Earnings']:.2f}" if values['VWAP_Earnings'] not in ['N/A', None] else 'N/A',
             values['VWAP_Earnings_trend'] if values['VWAP_Earnings_trend'] else '',
-            f"{values['current_volume'] / values['avg_volume_20d']:.2f}" if values['avg_volume_20d'] != 0 else 'N/A'
+            f"{values['current_volume'] / values['avg_volume_20d']:.2f}" if values['avg_volume_20d'] != 0 else 'N/A',
+            f"{values['P/S']:.1f}" if values['P/S'] not in ['N/A', None] else 'N/A',
+            values['P/S_trend'] if values['P/S_trend'] else '',
+            f"{values['P/FCF']:.1f}" if values['P/FCF'] not in ['N/A', None] else 'N/A',
+            values['P/FCF_trend'] if values['P/FCF_trend'] else ''
         ]
         
         row_colors = ['black'] * len(row)
@@ -150,8 +210,13 @@ def create_table(data):
             row_colors[1] = 'darkorange'
             row_font_colors[1] = 'white'
         
+        # Set color for 'E' column
+        if values['days_to_earnings'] is not None and values['days_to_earnings'] <= 21:
+            row_colors[2] = 'darkorange'
+            row_font_colors[2] = 'white'
+        
         # Set colors for SMA and VWAP columns
-        value_indices = [3, 5, 7, 9, 11, 13, 15, 17]
+        value_indices = [4, 6, 8, 10, 12, 14, 16, 18]
         for i in value_indices:
             if row[i] != 'N/A' and values['latest_price'] != 'N/A':
                 try:
@@ -164,7 +229,7 @@ def create_table(data):
                     pass
         
         # Set colors for trend columns
-        trend_indices = [4, 6, 8, 10, 12, 14, 16, 18]
+        trend_indices = [5, 7, 9, 11, 13, 15, 17, 19, 22, 24]
         for i in trend_indices:
             if row[i] == 'R':
                 row_colors[i] = 'green'
@@ -174,10 +239,10 @@ def create_table(data):
                 row_font_colors[i] = 'white'
         
         # Set color for volume comparison
-        if row[-1] != 'N/A':
+        if row[-5] != 'N/A':
             try:
-                if float(row[-1]) > 1:
-                    row_colors[-1] = 'darkorange'
+                if float(row[-5]) > 1:
+                    row_colors[-5] = 'darkorange'
             except ValueError:
                 # If conversion fails, leave the color as black
                 pass
@@ -190,6 +255,7 @@ def create_table(data):
     column_widths = [
         25,  # TICKER
         30,  # STATUS
+        15,  # E (Days to Earnings)
         25,  # LAST
         30, 10,  # 5D SMA and trend
         30, 10,  # 50D SMA and trend
@@ -199,13 +265,16 @@ def create_table(data):
         30, 10,  # VWAP HIGH and trend
         30, 10,  # VWAP LOW and trend
         30, 10,  # VWAP EARN and trend
-        40   # VOL/20D AVG
+        40,  # VOL/20D AVG
+        20, 10,  # P/S and trend
+        20, 10   # P/FCF and trend
     ]
 
     column_alignment = [
-        'left', # TICKER
+        'left',   # TICKER
         'center', # STATUS
-        'right', # LAST
+        'center', # E (Days to Earnings)
+        'right',  # LAST
         'right', 'center', # 5D SMA and trend
         'right', 'center', # 50D SMA and trend
         'right', 'center', # 150D SMA and trend
@@ -215,6 +284,8 @@ def create_table(data):
         'right', 'center', # VWAP LOW and trend
         'right', 'center', # VWAP EARN and trend
         'center', # VOL/20D AVG
+        'right', 'center', # P/S and trend
+        'right', 'center'  # P/FCF and trend
     ]
 
     fig = go.Figure(data=[go.Table(
@@ -253,18 +324,22 @@ def create_table(data):
     return fig
 
 def get_vix_data():
-    tickers = ["^VIX", "VXX", "VXZ"]
+    tickers = ["^VIX", "VXX", "VXZ", "QQQ", "SPY"]
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=30)  # Fetch 30 days of data to calculate 20-day MA
+    start_date = end_date - timedelta(days=365)  # Fetch 1 year of data to ensure enough for 150-day MA
     data = yf.download(tickers, start=start_date, end=end_date)
     
     vix_data = data['Close']['^VIX']
     vxx_data = data['Close']['VXX']
     vxz_data = data['Close']['VXZ']
+    qqq_data = data['Close']['QQQ']
+    spy_data = data['Close']['SPY']
     
     vix_spot = vix_data.iloc[-1]
     vxx_price = vxx_data.iloc[-1]
     vxz_price = vxz_data.iloc[-1]
+    qqq_price = qqq_data.iloc[-1]
+    spy_price = spy_data.iloc[-1]
     
     vix_ma20 = vix_data.rolling(window=20).mean().iloc[-1]
     vxx_ma20 = vxx_data.rolling(window=20).mean().iloc[-1]
@@ -273,20 +348,35 @@ def get_vix_data():
     vix_ratio = vix_spot / vix_ma20
     vxx_ratio = vxx_price / vxx_ma20
     vxz_ratio = vxz_price / vxz_ma20
+
+    # Calculate SMAs for QQQ and SPY
+    qqq_sma5 = qqq_data.rolling(window=5).mean().iloc[-1]
+    qqq_sma150 = qqq_data.rolling(window=150).mean().iloc[-1]
+    spy_sma5 = spy_data.rolling(window=5).mean().iloc[-1]
+    spy_sma150 = spy_data.rolling(window=150).mean().iloc[-1]
+
+    # Determine short-term and long-term trends
+    qqq_st = 'green' if qqq_price > qqq_sma5 else 'red'
+    qqq_lt = 'green' if qqq_price > qqq_sma150 else 'red'
+    spy_st = 'green' if spy_price > spy_sma5 else 'red'
+    spy_lt = 'green' if spy_price > spy_sma150 else 'red'
+
+    # Debug output
+    print(f"QQQ Price: {qqq_price:.2f}, QQQ 5 SMA: {qqq_sma5:.2f}, QQQ 150 SMA: {qqq_sma150:.2f}, QQQ ST Color: {qqq_st}, QQQ LT Color: {qqq_lt}")
+    print(f"SPY Price: {spy_price:.2f}, SPY 5 SMA: {spy_sma5:.2f}, SPY 150 SMA: {spy_sma150:.2f}, SPY ST Color: {spy_st}, SPY LT Color: {spy_lt}")
     
-    return vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio
+    return vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio, qqq_price, qqq_st, qqq_lt, spy_price, spy_st, spy_lt, qqq_sma5, qqq_sma150, spy_sma5, spy_sma150
 
 def main():
-    st.set_page_config(page_title="Skyhook v0.1", layout="wide")
+    st.set_page_config(page_title="Skyhook v0.2", layout="wide")
     
-    # Custom CSS for Bloomberg Terminal look
+# Update the CSS to include styles for spacing
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap');
     body {
         background-color: black;
         color: #FF9933;
-        font-family: 'Roboto Mono', monospace;
+        font-family: 'Arial', monospace;
         font-size: 14px;
     }
     .stApp {
@@ -394,21 +484,28 @@ def main():
         display: flex;
         align-items: center;
     }
+    .spacer {
+        width: 30px;  /* Adjust this value to increase or decrease spacing */
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    # Fetch VIX data
-    vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio = get_vix_data()
+    # Fetch VIX, QQQ, and SPY data
+    vix_spot, vxx_price, vxz_price, vix_ratio, vxx_ratio, vxz_ratio, qqq_price, qqq_st, qqq_lt, spy_price, spy_st, spy_lt, qqq_sma5, qqq_sma150, spy_sma5, spy_sma150 = get_vix_data()
 
     # Determine colors based on conditions
     vix_color = "red" if vix_spot > vxx_price or vix_spot > vxz_price else "green"
     vxx_color = "red" if vxx_price > vxz_price else "green"
 
-    # Header with title, VIX boxes, and info button
+    # Ensure LT colors are set correctly
+    qqq_lt = 'green' if qqq_price > qqq_sma150 else 'red' if not pd.isna(qqq_sma150) else 'gray'
+    spy_lt = 'green' if spy_price > spy_sma150 else 'red' if not pd.isna(spy_sma150) else 'gray'
+
+    # Header with title, VIX boxes, QQQ and SPY boxes, and info button
     st.markdown(f"""
     <div class="header-container">
         <div class="title-and-vix">
-            <h1>SKYHOOK スカイフック v0.1</h1>
+            <h1>SKYHOOK スカイフック v0.2</h1>
             <div class="vix-container">
                 <div class="vix-box" style="background-color: {vix_color}; color: white;">
                     VIX: {vix_spot:.2f} [{vix_ratio:.2f}]
@@ -418,6 +515,26 @@ def main():
                 </div>
                 <div class="vix-box" style="background-color: black; color: #FF9933; border: 1px solid #FF9933;">
                     VXZ: {vxz_price:.2f} [{vxz_ratio:.2f}]
+                </div>
+                <div class="spacer"></div>
+                <div class="vix-box" style="background-color: black; color: #FF9933; border: 1px solid #FF9933;">
+                    QQQ: {qqq_price:.2f}
+                </div>
+                <div class="vix-box" style="background-color: {qqq_st}; color: white;">
+                    ST
+                </div>
+                <div class="vix-box" style="background-color: {qqq_lt}; color: white;">
+                    LT
+                </div>
+                <div class="spacer"></div>
+                <div class="vix-box" style="background-color: black; color: #FF9933; border: 1px solid #FF9933;">
+                    SPY: {spy_price:.2f}
+                </div>
+                <div class="vix-box" style="background-color: {spy_st}; color: white;">
+                    ST
+                </div>
+                <div class="vix-box" style="background-color: {spy_lt}; color: white;">
+                    LT
                 </div>
             </div>
         </div>
@@ -463,33 +580,35 @@ def main():
     # Keyboard shortcut handling
     js = """
     <script>
-    const doc = window.parent.document;
-    function toggleInfo() {
-        const infoSection = doc.getElementById('info-section');
-        infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
-    }
-    doc.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const inputField = doc.querySelector('.stTextInput input');
-            if (inputField && inputField.value.trim() !== '') {
-                inputField.blur();
-                inputField.form.requestSubmit();
-            }
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            const inputField = doc.querySelector('.stTextInput input');
-            if (inputField) {
-                inputField.value = '';
-                inputField.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        } else if (e.key === '/') {
-            e.preventDefault();
-            const inputField = doc.querySelector('.stTextInput input');
-            if (inputField) inputField.focus();
-        } else if (e.key === 'i' || e.key === 'I') {
-            toggleInfo();
+    document.addEventListener('DOMContentLoaded', function() {
+        const doc = window.parent.document;
+        function toggleInfo() {
+            const infoSection = doc.getElementById('info-section');
+            infoSection.style.display = infoSection.style.display === 'none' ? 'block' : 'none';
         }
+        doc.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const inputField = doc.querySelector('.stTextInput input');
+                if (inputField && inputField.value.trim() !== '') {
+                    inputField.blur();
+                    inputField.form.requestSubmit();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                const inputField = doc.querySelector('.stTextInput input');
+                if (inputField) {
+                    inputField.value = '';
+                    inputField.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            } else if (e.key === '/') {
+                e.preventDefault();
+                const inputField = doc.querySelector('.stTextInput input');
+                if (inputField) inputField.focus();
+            } else if (e.key === 'i' || e.key === 'I') {
+                toggleInfo();
+            }
+        });
     });
     </script>
     """
